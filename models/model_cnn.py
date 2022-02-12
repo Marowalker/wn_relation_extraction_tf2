@@ -1,7 +1,7 @@
 import os
 import numpy as np
 import tensorflow as tf
-from sklearn.utils import shuffle
+from sklearn.utils import shuffle, resample
 from dataset import pad_sequences
 from utils import Timer, Log
 from data_utils import countNumRelation, countNumPos, countNumSynset, countVocab
@@ -10,17 +10,19 @@ from sklearn.metrics import f1_score
 
 tf.random.Generator = None
 
-seed = 13
+seed = 1234
 np.random.seed(seed)
 
 tf.compat.v1.disable_eager_execution()
 
 
 class CnnModel:
-    def __init__(self, model_name, embeddings, batch_size):
+    def __init__(self, model_name, embeddings, triples, wordnet, batch_size):
         self.model_name = model_name
         self.embeddings = embeddings
+        self.triples = triples
         self.batch_size = batch_size
+        self.wordnet_emb = wordnet
 
         self.max_length = constants.MAX_LENGTH
         # Num of dependency relations
@@ -51,6 +53,8 @@ class CnnModel:
         # Indexes of fourth channel (synset + dependency relations)
         self.synset_ids = tf.compat.v1.placeholder(name='synset_ids', shape=[None, None], dtype='int32')
 
+        self.triple_ids = tf.compat.v1.placeholder(name='triple_ids', shape=[None, None], dtype='int32')
+
         self.relations = tf.compat.v1.placeholder(name='relations', shape=[None, None], dtype='int32')
         self.dropout_embedding = tf.compat.v1.placeholder(dtype=tf.float32, shape=[], name="dropout_embedding")
         self.dropout = tf.compat.v1.placeholder(dtype=tf.float32, shape=[], name="dropout")
@@ -65,23 +69,18 @@ class CnnModel:
             dummy_eb = tf.Variable(np.zeros((1, constants.INPUT_W2V_DIM)), name="dummy", dtype=tf.float32,
                                    trainable=False)
             # Create dependency relations randomly
-            embeddings_re = tf.compat.v1.get_variable(name="re_lut",
-                                                      shape=[self.num_of_depend + 1, constants.INPUT_W2V_DIM],
-                                                      initializer=tf.keras.initializers.GlorotNormal(),
-                                                      dtype=tf.float32, regularizer=tf.keras.regularizers.l2(1e-4))
+            embeddings_re = tf.Variable(self.initializer(shape=[self.num_of_depend + 1, constants.INPUT_W2V_DIM],
+                                                         dtype=tf.float32), name="re_lut")
             # create direction vectors randomly
-            embedding_dir = tf.compat.v1.get_variable(name="dir_lut", shape=[3, constants.INPUT_W2V_DIM],
-                                                      initializer=tf.keras.initializers.GlorotNormal(),
-                                                      dtype=tf.float32, regularizer=tf.keras.regularizers.l2(1e-4))
+            embedding_dir = tf.Variable(self.initializer(shape=[3, constants.INPUT_W2V_DIM], dtype=tf.float32),
+                                        name="dir_lut")
             # Concat dummy vector and relations vectors
             embeddings_re = tf.concat([dummy_eb, embeddings_re], axis=0)
             # Concat relation vectors and direction vectors
             embeddings_re = tf.concat([embeddings_re, embedding_dir], axis=0)
 
-            # Create sibling word embeddings randomly
-            embeddings_sb = tf.compat.v1.get_variable(name="sb_lut", shape=[self.num_of_siblings + 1, 15],
-                                                      initializer=tf.keras.initializers.GlorotNormal(),
-                                                      dtype=tf.float32, regularizer=tf.keras.regularizers.l2(1e-4))
+            embeddings_sb = tf.Variable(self.initializer(shape=[self.num_of_siblings + 1, 15], dtype=tf.float32),
+                                        name="sb_lut")
             dummy_eb5 = tf.Variable(np.zeros((1, 15)), name="dummy5", dtype=tf.float32, trainable=False)
 
             embeddings_sb = tf.concat([dummy_eb5, embeddings_sb], axis=0)
@@ -90,15 +89,11 @@ class CnnModel:
                                       trainable=False)
             embeddings_sb = tf.concat([embeddings_sb, dummy_eb_ex], axis=-1)
 
-            # all_sb_rel_table = tf.concat([embeddings_re[:, :constants.INPUT_W2V_DIM], embeddings_sb], axis=0)
             all_sb_rel_table = tf.concat([embeddings_re, embeddings_sb], axis=0)
             all_sb_rel_lookup = tf.nn.embedding_lookup(params=all_sb_rel_table, ids=self.sibling_ids)
 
-            # p_sibling = tf.nn.pool(all_sb_rel_lookup, window_shape=[16, 1], pooling_type="MAX", padding="SAME")
-
-            weights = tf.compat.v1.get_variable(name='weights', shape=[1, constants.INPUT_W2V_DIM],
-                                                initializer=tf.keras.initializers.GlorotNormal(), dtype=tf.float32,
-                                                regularizer=tf.keras.regularizers.l2(1e-4), trainable=True)
+            weights = tf.Variable(self.initializer(shape=[1, constants.INPUT_W2V_DIM], dtype=tf.float32),
+                                  name="weights", trainable=True)
 
             all_sb_mean = all_sb_rel_lookup * weights
 
@@ -114,61 +109,54 @@ class CnnModel:
             self.word_embeddings = tf.nn.embedding_lookup(params=embedding_wd, ids=self.word_ids)
             self.word_embeddings = tf.nn.dropout(self.word_embeddings, 1 - self.dropout_embedding)
 
+            embedding_tr = tf.Variable(self.triples, name='triple_lut', dtype=tf.float32, trainable=False)
+            embedding_tr = tf.concat([dummy_eb, embedding_tr], axis=0)
+            self.triple_embeddings = tf.nn.embedding_lookup(params=embedding_tr, ids=self.triple_ids)
+            self.triple_embeddings = tf.nn.dropout(self.triple_embeddings, 1 - self.dropout_embedding)
+
             # Create pos tag embeddings randomly
             dummy_eb2 = tf.Variable(np.zeros((1, 6)), name="dummy2", dtype=tf.float32, trainable=False)
-            embeddings_re2 = tf.compat.v1.get_variable(name="re_lut2", shape=[self.num_of_depend + 1, 6],
-                                                       initializer=tf.keras.initializers.GlorotNormal(),
-                                                       dtype=tf.float32, regularizer=tf.keras.regularizers.l2(1e-4))
+            embeddings_re2 = tf.Variable(self.initializer(shape=[self.num_of_depend + 1, 6], dtype=tf.float32),
+                                         name="re_lut2")
             embeddings_re2 = tf.concat([dummy_eb2, embeddings_re2], axis=0)
-            embedding_dir2 = tf.compat.v1.get_variable(name="dir2_lut", shape=[3, 6],
-                                                       initializer=tf.keras.initializers.GlorotNormal(),
-                                                       dtype=tf.float32, regularizer=tf.keras.regularizers.l2(1e-4))
+            embedding_dir2 = tf.Variable(self.initializer(shape=[3, 6], dtype=tf.float32), name="dir2_lut")
             embeddings_re2 = tf.concat([embeddings_re2, embedding_dir2], axis=0)
-            embeddings_pos = tf.compat.v1.get_variable(name='pos_lut', shape=[self.num_of_pos + 1, 6],
-                                                       initializer=tf.keras.initializers.GlorotNormal(),
-                                                       dtype=tf.float32, regularizer=tf.keras.regularizers.l2(1e-4))
+            embeddings_pos = tf.Variable(self.initializer(shape=[self.num_of_pos + 1, 6], dtype=tf.float32),
+                                         name='pos_lut')
             embeddings_pos = tf.concat([dummy_eb2, embeddings_pos], axis=0)
             embeddings_pos = tf.concat([embeddings_pos, embeddings_re2], axis=0)
             self.pos_embeddings = tf.nn.embedding_lookup(params=embeddings_pos, ids=self.pos_ids)
             self.pos_embeddings = tf.nn.dropout(self.pos_embeddings, 1 - self.dropout_embedding)
 
             # Create synset embeddings randomly
-            dummy_eb4 = tf.Variable(np.zeros((1, 12)), name="dummy4", dtype=tf.float32, trainable=False)
-            embeddings_re4 = tf.compat.v1.get_variable(name="re_lut4", shape=[self.num_of_depend + 1, 12],
-                                                       initializer=tf.keras.initializers.GlorotNormal(),
-                                                       dtype=tf.float32, regularizer=tf.keras.regularizers.l2(1e-4))
+            dummy_eb4 = tf.Variable(np.zeros((1, 18)), name="dummy4", dtype=tf.float32,
+                                    trainable=False)
+            embeddings_re4 = tf.Variable(self.initializer(shape=[self.num_of_depend + 1, 18],
+                                                          dtype=tf.float32), name="re_lut4")
             # embeddings_re4 = tf.random.uniform(name="re_lut4", shape=[self.num_of_depend + 1, 12], minval=0,
             #                                    maxval=1e-4)
             embeddings_re4 = tf.concat([dummy_eb4, embeddings_re4], axis=0)
-            embedding_dir4 = tf.compat.v1.get_variable(name="dir4_lut", shape=[3, 12],
-                                                       initializer=tf.keras.initializers.GlorotNormal(),
-                                                       dtype=tf.float32, regularizer=tf.keras.regularizers.l2(1e-4))
+            embedding_dir4 = tf.Variable(self.initializer(shape=[3, 18], dtype=tf.float32),
+                                         name="dir4_lut")
             embeddings_re4 = tf.concat([embeddings_re4, embedding_dir4], axis=0)
-            embeddings_synset = tf.compat.v1.get_variable(name='syn_lut', shape=[self.num_of_synset + 1, 12],
-                                                          initializer=tf.keras.initializers.GlorotNormal(),
-                                                          dtype=tf.float32, regularizer=tf.keras.regularizers.l2(1e-4))
+            embeddings_synset = tf.Variable(self.wordnet_emb, name='syn_lut', dtype=tf.float32, trainable=False)
             embeddings_synset = tf.concat([dummy_eb4, embeddings_synset], axis=0)
             embeddings_synset = tf.concat([embeddings_synset, embeddings_re4], axis=0)
             self.synset_embeddings = tf.nn.embedding_lookup(params=embeddings_synset, ids=self.synset_ids)
-            self.synset_embeddings = tf.nn.dropout(self.synset_embeddings, 1 - (self.dropout_embedding))
+            self.synset_embeddings = tf.nn.dropout(self.synset_embeddings, 1 - self.dropout_embedding)
 
             # Create position embeddings randomly, each vector has length of WORD EMBEDDINGS / 2
-            embeddings_position = tf.compat.v1.get_variable(name='position_lut', shape=[self.max_length * 2, 25],
-                                                            initializer=tf.keras.initializers.GlorotNormal(),
-                                                            dtype=tf.float32, regularizer=tf.keras.regularizers.l2(1e-4)
-                                                            , trainable=True)
+            embeddings_position = tf.Variable(self.initializer(shape=[self.max_length * 2, 25], dtype=tf.float32),
+                                              name='position_lut', trainable=True)
             dummy_posi_emb = tf.Variable(np.zeros((1, 25)),
                                          dtype=tf.float32)  # constants.INPUT_W2V_DIM // 2)), dtype=tf.float32)
             embeddings_position = tf.concat([dummy_posi_emb, embeddings_position], axis=0)
 
             dummy_eb3 = tf.Variable(np.zeros((1, 50)), name="dummy3", dtype=tf.float32, trainable=False)
-            embeddings_re3 = tf.compat.v1.get_variable(name="re_lut3", shape=[self.num_of_depend + 1, 50],
-                                                       initializer=tf.keras.initializers.GlorotNormal(),
-                                                       dtype=tf.float32, regularizer=tf.keras.regularizers.l2(1e-4))
+            embeddings_re3 = tf.Variable(self.initializer(shape=[self.num_of_depend + 1, 50], dtype=tf.float32),
+                                         name="re_lut3")
             embeddings_re3 = tf.concat([dummy_eb3, embeddings_re3], axis=0)
-            embedding_dir3 = tf.compat.v1.get_variable(name="dir3_lut", shape=[3, 50],
-                                                       initializer=tf.keras.initializers.GlorotNormal(),
-                                                       dtype=tf.float32, regularizer=tf.keras.regularizers.l2(1e-4))
+            embedding_dir3 = tf.Variable(self.initializer(shape=[3, 50], dtype=tf.float32), name="dir3_lut")
             embeddings_re3 = tf.concat([embeddings_re3, embedding_dir3], axis=0)
             # Concat each position vector with half of each dependency relation vector
             embeddings_position1 = tf.concat([embeddings_position, embeddings_re3[:, :25]],
@@ -185,12 +173,13 @@ class CnnModel:
             self.position_embeddings = tf.concat([self.position_embeddings_1, self.position_embeddings_2], axis=-1)
 
     def _multiple_input_cnn_layers(self):
-        # Create 4-channel features
+        # Create 5-channel features
         self.word_embeddings = tf.expand_dims(self.word_embeddings, -1)
         self.sibling_embeddings = tf.expand_dims(self.sibling_embeddings, -1)
         self.pos_embeddings = tf.expand_dims(self.pos_embeddings, -1)
         self.synset_embeddings = tf.expand_dims(self.synset_embeddings, -1)
         self.position_embeddings = tf.expand_dims(self.position_embeddings, -1)
+        self.triple_embeddings = tf.expand_dims(self.triple_embeddings, -1)
 
         # create CNN model
         cnn_outputs = []
@@ -205,6 +194,16 @@ class CnnModel:
                 kernel_initializer=tf.keras.initializers.GlorotNormal(),
                 kernel_regularizer=tf.keras.regularizers.l2(1e-4)
             )(self.word_embeddings)
+
+            cnn_output_tr = tf.keras.layers.Conv2D(
+                filters=filters,
+                kernel_size=(k, constants.INPUT_W2V_DIM),
+                strides=(1, 1),
+                activation='tanh',
+                use_bias=False, padding="valid",
+                kernel_initializer=tf.keras.initializers.GlorotNormal(),
+                kernel_regularizer=tf.keras.regularizers.l2(1e-4)
+            )(self.triple_embeddings)
 
             cnn_output_sb = tf.keras.layers.Conv2D(
                 filters=filters,
@@ -228,7 +227,7 @@ class CnnModel:
 
             cnn_output_synset = tf.keras.layers.Conv2D(
                 filters=filters,
-                kernel_size=(k, 12),
+                kernel_size=(k, 18),
                 strides=(1, 1),
                 activation='tanh',
                 use_bias=False, padding="valid",
@@ -246,10 +245,14 @@ class CnnModel:
                 kernel_regularizer=tf.keras.regularizers.l2(1e-4)
             )(self.position_embeddings)
 
+            # cnn_output = tf.concat(
+            #     [cnn_output_w, cnn_output_sb, cnn_output_pos, cnn_output_synset, cnn_output_position],
+            #     axis=1)
             cnn_output = tf.concat(
-                [cnn_output_w, cnn_output_sb, cnn_output_pos, cnn_output_synset, cnn_output_position],
+                [cnn_output_w, cnn_output_tr, cnn_output_sb, cnn_output_pos, cnn_output_synset, cnn_output_position],
                 axis=1)
             # cnn_output = tf.concat([cnn_output_w, cnn_output_pos, cnn_output_synset, cnn_output_position], axis=1)
+            # cnn_output = cnn_output_w
             cnn_output = tf.reduce_max(input_tensor=cnn_output, axis=1)
             cnn_output = tf.reshape(cnn_output, [-1, filters])
             cnn_outputs.append(cnn_output)
@@ -295,7 +298,7 @@ class CnnModel:
         with tf.compat.v1.variable_scope("train_step"):
             tvars = tf.compat.v1.trainable_variables()
             grad, _ = tf.clip_by_global_norm(tf.gradients(ys=self.loss, xs=tvars), 100.0)
-            optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=2e-4)
+            optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=1e-4)
             self.train_op = optimizer.apply_gradients(zip(grad, tvars))
 
     def build(self):
@@ -324,6 +327,7 @@ class CnnModel:
             relation_ids = data['relations'][start:start + self.batch_size]
             directions = data['directions'][start:start + self.batch_size]
             labels = data['labels'][start:start + self.batch_size]
+            triple_ids = data['triples'][start: start + self.batch_size]
 
             # Padding sentences to the length of longest one
             word_ids, _ = pad_sequences(word_ids, pad_tok=0, max_sent_length=self.max_length)
@@ -334,6 +338,7 @@ class CnnModel:
             synset_ids, _ = pad_sequences(synset_ids, pad_tok=0, max_sent_length=self.max_length)
             relation_ids, _ = pad_sequences(relation_ids, pad_tok=0, max_sent_length=self.max_length)
             directions, _ = pad_sequences(directions, pad_tok=0, max_sent_length=self.max_length)
+            triple_ids, _ = pad_sequences(triple_ids, pad_tok=0, max_sent_length=self.max_length)
 
             # Create index matrix with words and dependency relations between words
             new_relation_ids = self.embeddings.shape[0] + relation_ids + directions
@@ -387,7 +392,7 @@ class CnnModel:
             start += self.batch_size
             idx += 1
             yield positions_1_relation_ids, positions_2_relation_ids, word_relation_ids, sibling_relation_ids, \
-                  pos_relation_ids, synset_relation_ids, relation_ids, labels
+                  pos_relation_ids, synset_relation_ids, relation_ids, labels, triple_ids
             # yield positions_1_relation_ids, positions_2_relation_ids, word_relation_ids, pos_relation_ids, \
             #     synset_relation_ids, relation_ids, labels
 
@@ -405,7 +410,7 @@ class CnnModel:
             for e in range(epochs):
                 # print(len(self.dataset_train.siblings))
                 words_shuffled, siblings_shuffled, positions_1_shuffle, positions_2_shuffle, poses_shuffled, \
-                synset_shuffled, relations_shuffled, directions_shuffled, labels_shuffled = shuffle(
+                synset_shuffled, relations_shuffled, directions_shuffled, labels_shuffled, triple_shuffled = shuffle(
                     # words_shuffled, positions_1_shuffle, positions_2_shuffle, poses_shuffled, synset_shuffled, \
                     #     relations_shuffled, directions_shuffled, labels_shuffled=shuffle(
                     self.dataset_train.words,
@@ -416,7 +421,8 @@ class CnnModel:
                     self.dataset_train.synsets,
                     self.dataset_train.relations,
                     self.dataset_train.directions,
-                    self.dataset_train.labels
+                    self.dataset_train.labels,
+                    self.dataset_train.triples
                 )
 
                 data = {
@@ -429,10 +435,12 @@ class CnnModel:
                     'relations': relations_shuffled,
                     'directions': directions_shuffled,
                     'labels': labels_shuffled,
+                    'triples': triple_shuffled
                 }
 
                 for idx, batch in enumerate(self._next_batch(data=data, num_batch=num_batch_train)):
-                    positions_1, positions_2, word_ids, sibling_ids, pos_ids, synset_ids, relation_ids, labels = batch
+                    positions_1, positions_2, word_ids, sibling_ids, pos_ids, synset_ids, relation_ids, labels, \
+                        triple_ids = batch
                     # positions_1, positions_2, word_ids, pos_ids, synset_ids, relation_ids, labels = batch
                     feed_dict = {
                         self.positions_1: positions_1,
@@ -443,6 +451,7 @@ class CnnModel:
                         self.synset_ids: synset_ids,
                         self.relations: relation_ids,
                         self.labels: labels,
+                        self.triple_ids: triple_ids,
                         self.dropout_embedding: 0.5,
                         self.dropout: 0.5,
                         self.is_training: True
@@ -465,12 +474,13 @@ class CnnModel:
                         'synsets': self.dataset_validation.synsets,
                         'relations': self.dataset_validation.relations,
                         'directions': self.dataset_validation.directions,
-                        'labels': self.dataset_validation.labels
+                        'labels': self.dataset_validation.labels,
+                        'triples': self.dataset_validation.triples
                     }
 
                     for idx, batch in enumerate(self._next_batch(data=data, num_batch=num_batch_val)):
-                        positions_1, positions_2, word_ids, sibling_ids, pos_ids, synset_ids, relation_ids, labels = \
-                            batch
+                        positions_1, positions_2, word_ids, sibling_ids, pos_ids, synset_ids, relation_ids, labels, \
+                            triple_ids = batch
                         # positions_1, positions_2, word_ids, pos_ids, synset_ids, relation_ids, labels = batch
                         acc, f1 = self._accuracy(sess, feed_dict={
                             self.positions_1: positions_1,
@@ -481,6 +491,7 @@ class CnnModel:
                             self.synset_ids: synset_ids,
                             self.relations: relation_ids,
                             self.labels: labels,
+                            self.triple_ids: triple_ids,
                             self.dropout_embedding: 0.5,
                             self.dropout: 0.5,
                             self.is_training: True
@@ -561,11 +572,13 @@ class CnnModel:
                 'synsets': test.synsets,
                 'relations': test.relations,
                 'directions': test.directions,
-                'labels': test.labels
+                'labels': test.labels,
+                'triples': test.triples
             }
 
             for idx, batch in enumerate(self._next_batch(data=data, num_batch=num_batch)):
-                positions_1, positions_2, word_ids, sibling_ids, pos_ids, synset_ids, relation_ids, labels = batch
+                positions_1, positions_2, word_ids, sibling_ids, pos_ids, synset_ids, relation_ids, labels, triple_ids \
+                    = batch
                 # positions_1, positions_2, word_ids, pos_ids, synset_ids, relation_ids, labels = batch
                 feed_dict = {
                     self.positions_1: positions_1,
@@ -576,6 +589,7 @@ class CnnModel:
                     self.synset_ids: synset_ids,
                     self.relations: relation_ids,
                     self.labels: labels,
+                    self.triple_ids: triple_ids,
                     self.dropout_embedding: 1,
                     self.dropout: 1,
                     self.is_training: False

@@ -6,7 +6,7 @@ UNK = '$UNK$'
 
 parser = argparse.ArgumentParser(description='Multi-region size CNN for re')
 parser.add_argument('-i', help='Job identity', type=int, default=0)
-parser.add_argument('-rb', help='Rebuild data', type=int, default=1)
+parser.add_argument('-rb', help='Rebuild data', type=int, default=0)
 parser.add_argument('-e', help='Number of epochs', type=int, default=80)
 parser.add_argument('-p', help='Patience of early stop (0 for ignore early stop)', type=int, default=10)
 
@@ -48,6 +48,7 @@ W2V_DATA = DATA + 'w2v_model/'
 ALL_WORDS = DATA + 'vocab_lower.txt'
 ALL_POSES = DATA + 'all_pos.txt'
 ALL_SYNSETS = DATA + 'all_hypernyms.txt'
+# ALL_SYNSETS = DATA + 'all_synsets.txt'
 # ALL_DEPENDS = DATA + 'all_depend.txt'
 ALL_DEPENDS = DATA + 'no_dir_depend.txt'
 

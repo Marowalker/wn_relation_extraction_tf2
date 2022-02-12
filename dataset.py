@@ -59,8 +59,10 @@ def pad_sequences(sequences, pad_tok, max_sent_length, nlevels=1):
 
 class Dataset:
     # added synset for Dataset class
-    def __init__(self, data_name, vocab_words=None, vocab_poses=None, vocab_synset=None, vocab_depends=None, process_data=True):
+    def __init__(self, data_name, triple_name, vocab_words=None, vocab_poses=None, vocab_synset=None,
+                 vocab_depends=None, vocab_chems=None, vocab_dis=None, vocab_rel=None, process_data=True):
         self.data_name = data_name
+        self.triple_name = triple_name
 
         self.words = None
         self.siblings = None
@@ -77,6 +79,10 @@ class Dataset:
         self.vocab_poses = vocab_poses
         self.vocab_synsets = vocab_synset
         self.vocab_depends = vocab_depends
+
+        self.vocab_chems = vocab_chems
+        self.vocab_dis = vocab_dis
+        self.vocab_rel = vocab_rel
 
         if process_data:
             self._process_data()
@@ -95,6 +101,11 @@ class Dataset:
             data_directions, self.identities = self.parse_raw(raw_data)
         # data_words, data_postitions, data_y, data_pos, data_synsets, data_relations, data_directions, \
         #     self.identities = self.parse_raw(raw_data)
+
+        with open(self.triple_name, 'r') as f2:
+            raw_triple = f2.readlines()
+
+        triple_data = self.parse_triple(raw_triple)
 
         words = []
         siblings = []
@@ -139,7 +150,7 @@ class Dataset:
                 ws.append(word_id)
 
                 temp = []
-                temp_weight = []
+                # temp_weight = []
                 for token_word in sb:
                     # print(token_word)
                     # word = token_word.split('_')[0]
@@ -192,6 +203,22 @@ class Dataset:
         self.synsets = synsets
         self.relations = relations
         self.directions = directions
+        self.triples = triple_data
+
+    def parse_triple(self, raw_data):
+        all_triples = []
+        for line in raw_data:
+            l = line.split()
+            if len(l) == 1:
+                pass
+            else:
+                c, d, r = l
+                c_id = int(self.vocab_chems[c])
+                d_id = int(self.vocab_dis[d]) + c_id
+                r_id = int(self.vocab_rel[r]) + d_id
+                all_triples.append([c_id, d_id, r_id, 0, 0])
+
+        return all_triples
 
     def parse_raw(self, raw_data):
         all_words = []

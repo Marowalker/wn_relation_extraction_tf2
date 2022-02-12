@@ -1,11 +1,17 @@
+import pickle
+
 import numpy as np
 from data_utils import load_vocab
 import constants
+import os
+from collections import defaultdict
 
 
 # NLPLAB_W2V = 'data/w2v_model/wikipedia-pubmed-and-PMC-w2v.bin'
 # NLPLAB_W2V = 'data/w2v_model/BioWordVec_PubMed_MIMICIII_d200.vec.bin'
 NLPLAB_W2V = 'data/w2v_model/w2v_retrain.bin'
+os.chdir("..")
+os.chdir("..")
 
 
 def export_trimmed_nlplab_vectors(vocab, trimmed_filename, dim=200, bin=NLPLAB_W2V):
@@ -51,5 +57,43 @@ def export_trimmed_nlplab_vectors(vocab, trimmed_filename, dim=200, bin=NLPLAB_W
     np.savez_compressed(trimmed_filename, embeddings=embeddings)
 
 
-vocab_words = load_vocab(constants.ALL_WORDS)
-export_trimmed_nlplab_vectors(vocab_words, 'w2v_retrain_nlplab.npz')
+def get_all_offsets():
+    file = open('data/wordnet-entities.txt')
+    lines = file.readlines()
+    temp = defaultdict()
+    for (idx, line) in enumerate(lines):
+        l = line.split()
+        temp[l[0]] = idx + 1
+    return temp
+
+
+def trim_wordnet(filename):
+    with open('data/w2v_model/wordnet_embeddings.pkl', 'rb') as f:
+        emb = pickle.load(f)
+    hyp_vocab = load_vocab(constants.ALL_SYNSETS)
+    count = 0
+    m_size = len(hyp_vocab)
+    print("vobcab length: ", m_size)
+    embeddings = np.zeros([len(hyp_vocab) + 1, emb.shape[-1]])
+    all_offsets = get_all_offsets()
+
+    for off in hyp_vocab:
+        # print(off)
+        if off in all_offsets:
+            # print(off)
+            count += 1
+            idx = hyp_vocab[off]
+            emb_idx = all_offsets[off]
+            embeddings[idx] = emb[emb_idx]
+    print('Missing rate {}'.format(1.0 * (m_size - count) / m_size))
+    print("Embeddings: ")
+    print(embeddings)
+    np.savez_compressed(filename, embeddings=embeddings)
+
+# vocab_words = load_vocab(constants.ALL_WORDS)
+# export_trimmed_nlplab_vectors(vocab_words, 'w2v_retrain_nlplab.npz')
+
+
+trim_wordnet('data/w2v_model/wordnet_embeddings.npz')
+
+

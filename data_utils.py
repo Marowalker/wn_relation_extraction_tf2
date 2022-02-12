@@ -131,3 +131,18 @@ def countVocab():
         return count
 
 
+def make_triple_vocab(infile):
+    file = open(infile)
+    lines = file.readlines()
+    lines = [line.strip() for line in lines]
+    # raw_vocab = defaultdict()
+    id_vocab = defaultdict()
+    for idx, line in enumerate(lines):
+        if idx != 0:
+            pairs = line.split('\t')
+            name, name_id = pairs[0], pairs[1]
+            # raw_vocab[name_id] = name
+            id_vocab[name_id] = idx
+    return id_vocab
+
+
