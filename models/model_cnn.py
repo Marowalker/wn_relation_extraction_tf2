@@ -53,7 +53,7 @@ class CnnModel:
         # Indexes of fourth channel (synset + dependency relations)
         self.synset_ids = tf.compat.v1.placeholder(name='synset_ids', shape=[None, None], dtype='int32')
 
-        self.triple_ids = tf.compat.v1.placeholder(name='triple_ids', shape=[None, None], dtype='int32')
+        # self.triple_ids = tf.compat.v1.placeholder(name='triple_ids', shape=[None, None], dtype='int32')
 
         self.relations = tf.compat.v1.placeholder(name='relations', shape=[None, None], dtype='int32')
         self.dropout_embedding = tf.compat.v1.placeholder(dtype=tf.float32, shape=[], name="dropout_embedding")
@@ -109,10 +109,10 @@ class CnnModel:
             self.word_embeddings = tf.nn.embedding_lookup(params=embedding_wd, ids=self.word_ids)
             self.word_embeddings = tf.nn.dropout(self.word_embeddings, 1 - self.dropout_embedding)
 
-            embedding_tr = tf.Variable(self.triples, name='triple_lut', dtype=tf.float32, trainable=False)
-            embedding_tr = tf.concat([dummy_eb, embedding_tr], axis=0)
-            self.triple_embeddings = tf.nn.embedding_lookup(params=embedding_tr, ids=self.triple_ids)
-            self.triple_embeddings = tf.nn.dropout(self.triple_embeddings, 1 - self.dropout_embedding)
+            # embedding_tr = tf.Variable(self.triples, name='triple_lut', dtype=tf.float32, trainable=False)
+            # embedding_tr = tf.concat([dummy_eb, embedding_tr], axis=0)
+            # self.triple_embeddings = tf.nn.embedding_lookup(params=embedding_tr, ids=self.triple_ids)
+            # self.triple_embeddings = tf.nn.dropout(self.triple_embeddings, 1 - self.dropout_embedding)
 
             # Create pos tag embeddings randomly
             dummy_eb2 = tf.Variable(np.zeros((1, 6)), name="dummy2", dtype=tf.float32, trainable=False)
@@ -179,7 +179,7 @@ class CnnModel:
         self.pos_embeddings = tf.expand_dims(self.pos_embeddings, -1)
         self.synset_embeddings = tf.expand_dims(self.synset_embeddings, -1)
         self.position_embeddings = tf.expand_dims(self.position_embeddings, -1)
-        self.triple_embeddings = tf.expand_dims(self.triple_embeddings, -1)
+        # self.triple_embeddings = tf.expand_dims(self.triple_embeddings, -1)
 
         # create CNN model
         cnn_outputs = []
@@ -195,15 +195,15 @@ class CnnModel:
                 kernel_regularizer=tf.keras.regularizers.l2(1e-4)
             )(self.word_embeddings)
 
-            cnn_output_tr = tf.keras.layers.Conv2D(
-                filters=filters,
-                kernel_size=(k, constants.INPUT_W2V_DIM),
-                strides=(1, 1),
-                activation='tanh',
-                use_bias=False, padding="valid",
-                kernel_initializer=tf.keras.initializers.GlorotNormal(),
-                kernel_regularizer=tf.keras.regularizers.l2(1e-4)
-            )(self.triple_embeddings)
+            # cnn_output_tr = tf.keras.layers.Conv2D(
+            #     filters=filters,
+            #     kernel_size=(k, constants.INPUT_W2V_DIM),
+            #     strides=(1, 1),
+            #     activation='tanh',
+            #     use_bias=False, padding="valid",
+            #     kernel_initializer=tf.keras.initializers.GlorotNormal(),
+            #     kernel_regularizer=tf.keras.regularizers.l2(1e-4)
+            # )(self.triple_embeddings)
 
             cnn_output_sb = tf.keras.layers.Conv2D(
                 filters=filters,
@@ -245,12 +245,12 @@ class CnnModel:
                 kernel_regularizer=tf.keras.regularizers.l2(1e-4)
             )(self.position_embeddings)
 
-            # cnn_output = tf.concat(
-            #     [cnn_output_w, cnn_output_sb, cnn_output_pos, cnn_output_synset, cnn_output_position],
-            #     axis=1)
             cnn_output = tf.concat(
-                [cnn_output_w, cnn_output_tr, cnn_output_sb, cnn_output_pos, cnn_output_synset, cnn_output_position],
+                [cnn_output_w, cnn_output_sb, cnn_output_pos, cnn_output_synset, cnn_output_position],
                 axis=1)
+            # cnn_output = tf.concat(
+            #     [cnn_output_w, cnn_output_tr, cnn_output_sb, cnn_output_pos, cnn_output_synset, cnn_output_position],
+            #     axis=1)
             # cnn_output = tf.concat([cnn_output_w, cnn_output_pos, cnn_output_synset, cnn_output_position], axis=1)
             # cnn_output = cnn_output_w
             cnn_output = tf.reduce_max(input_tensor=cnn_output, axis=1)
@@ -327,7 +327,7 @@ class CnnModel:
             relation_ids = data['relations'][start:start + self.batch_size]
             directions = data['directions'][start:start + self.batch_size]
             labels = data['labels'][start:start + self.batch_size]
-            triple_ids = data['triples'][start: start + self.batch_size]
+            # triple_ids = data['triples'][start: start + self.batch_size]
 
             # Padding sentences to the length of longest one
             word_ids, _ = pad_sequences(word_ids, pad_tok=0, max_sent_length=self.max_length)
@@ -338,7 +338,7 @@ class CnnModel:
             synset_ids, _ = pad_sequences(synset_ids, pad_tok=0, max_sent_length=self.max_length)
             relation_ids, _ = pad_sequences(relation_ids, pad_tok=0, max_sent_length=self.max_length)
             directions, _ = pad_sequences(directions, pad_tok=0, max_sent_length=self.max_length)
-            triple_ids, _ = pad_sequences(triple_ids, pad_tok=0, max_sent_length=self.max_length)
+            # triple_ids, _ = pad_sequences(triple_ids, pad_tok=0, max_sent_length=self.max_length)
 
             # Create index matrix with words and dependency relations between words
             new_relation_ids = self.embeddings.shape[0] + relation_ids + directions
@@ -392,7 +392,7 @@ class CnnModel:
             start += self.batch_size
             idx += 1
             yield positions_1_relation_ids, positions_2_relation_ids, word_relation_ids, sibling_relation_ids, \
-                  pos_relation_ids, synset_relation_ids, relation_ids, labels, triple_ids
+                  pos_relation_ids, synset_relation_ids, relation_ids, labels
             # yield positions_1_relation_ids, positions_2_relation_ids, word_relation_ids, pos_relation_ids, \
             #     synset_relation_ids, relation_ids, labels
 
@@ -435,12 +435,12 @@ class CnnModel:
                     'relations': relations_shuffled,
                     'directions': directions_shuffled,
                     'labels': labels_shuffled,
-                    'triples': triple_shuffled
+                    # 'triples': triple_shuffled
                 }
 
                 for idx, batch in enumerate(self._next_batch(data=data, num_batch=num_batch_train)):
                     positions_1, positions_2, word_ids, sibling_ids, pos_ids, synset_ids, relation_ids, labels, \
-                        triple_ids = batch
+                         = batch
                     # positions_1, positions_2, word_ids, pos_ids, synset_ids, relation_ids, labels = batch
                     feed_dict = {
                         self.positions_1: positions_1,
@@ -451,7 +451,7 @@ class CnnModel:
                         self.synset_ids: synset_ids,
                         self.relations: relation_ids,
                         self.labels: labels,
-                        self.triple_ids: triple_ids,
+                        # self.triple_ids: triple_ids,
                         self.dropout_embedding: 0.5,
                         self.dropout: 0.5,
                         self.is_training: True
@@ -475,12 +475,12 @@ class CnnModel:
                         'relations': self.dataset_validation.relations,
                         'directions': self.dataset_validation.directions,
                         'labels': self.dataset_validation.labels,
-                        'triples': self.dataset_validation.triples
+                        # 'triples': self.dataset_validation.triples
                     }
 
                     for idx, batch in enumerate(self._next_batch(data=data, num_batch=num_batch_val)):
                         positions_1, positions_2, word_ids, sibling_ids, pos_ids, synset_ids, relation_ids, labels, \
-                            triple_ids = batch
+                             = batch
                         # positions_1, positions_2, word_ids, pos_ids, synset_ids, relation_ids, labels = batch
                         acc, f1 = self._accuracy(sess, feed_dict={
                             self.positions_1: positions_1,
@@ -491,7 +491,7 @@ class CnnModel:
                             self.synset_ids: synset_ids,
                             self.relations: relation_ids,
                             self.labels: labels,
-                            self.triple_ids: triple_ids,
+                            # self.triple_ids: triple_ids,
                             self.dropout_embedding: 0.5,
                             self.dropout: 0.5,
                             self.is_training: True
@@ -573,11 +573,11 @@ class CnnModel:
                 'relations': test.relations,
                 'directions': test.directions,
                 'labels': test.labels,
-                'triples': test.triples
+                # 'triples': test.triples
             }
 
             for idx, batch in enumerate(self._next_batch(data=data, num_batch=num_batch)):
-                positions_1, positions_2, word_ids, sibling_ids, pos_ids, synset_ids, relation_ids, labels, triple_ids \
+                positions_1, positions_2, word_ids, sibling_ids, pos_ids, synset_ids, relation_ids, labels,  \
                     = batch
                 # positions_1, positions_2, word_ids, pos_ids, synset_ids, relation_ids, labels = batch
                 feed_dict = {
@@ -589,7 +589,7 @@ class CnnModel:
                     self.synset_ids: synset_ids,
                     self.relations: relation_ids,
                     self.labels: labels,
-                    self.triple_ids: triple_ids,
+                    # self.triple_ids: triple_ids,
                     self.dropout_embedding: 1,
                     self.dropout: 1,
                     self.is_training: False

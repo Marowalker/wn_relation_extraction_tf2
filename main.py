@@ -81,7 +81,7 @@ def main():
     # Build model
     model.build()
 
-    for i in range(5):
+    for i in range(1):
         model.load_data(train=train, validation=validation)
         model.run_train(epochs=constants.EPOCHS, early_stopping=constants.EARLY_STOPPING, patience=constants.PATIENCE)
 

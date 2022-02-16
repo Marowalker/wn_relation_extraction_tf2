@@ -53,7 +53,8 @@ ALL_SYNSETS = DATA + 'all_hypernyms.txt'
 ALL_DEPENDS = DATA + 'no_dir_depend.txt'
 
 # TRIMMED_W2V = W2V_DATA + 'biobert_nlplab.npz'
-TRIMMED_W2V = W2V_DATA + 'biowordvec_nlplab.npz'
+# TRIMMED_W2V = W2V_DATA + 'biowordvec_nlplab.npz'
+TRIMMED_W2V = W2V_DATA + 'biowordvec_and_kb_nlplab.npz'
 # TRIMMED_W2V = W2V_DATA + 'trimmed_w2v.npz'
 
 TRAINED_MODELS = DATA + 'trained_models/'
